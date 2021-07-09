@@ -44,7 +44,7 @@ public:
   KeyValMap& MutableHeaders();
 
   const KeyValMap& Headers() const;
-  bool HasHeaderField(const std::string) const;
+  bool HasHeaderField(const std::string&) const;
   void InsertHeader(const std::string&, const std::string&);
   void InsertHeader(const char*, const char*);
   const std::string& GetHeader(const std::string&) const;

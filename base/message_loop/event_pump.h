@@ -28,9 +28,6 @@
 #include "fd_event.h"
 #include "io_multiplexer.h"
 #include "timeout_event.h"
-extern "C" {
-#include <thirdparty/timeout/timeout.h>
-}
 
 namespace base {
 
@@ -60,6 +57,8 @@ public:
 
   void Run();
 
+  void RunOnce();
+
   void PrepareRun();
 
   bool Running() { return running_; }
@@ -86,7 +85,7 @@ protected:
    * timeoutevent will be invoke and re shedule if was repeated*/
   void ProcessTimerEvent();
 
-  void InvokeFiredEvent(FiredEvent* start, int count);
+  void InvokeFiredEvent(FiredEvent* evs, int count);
   /* return the minimal timeout for next poll
    * return 0 when has event expired,
    * return default_timeout when no other timeout provided*/
@@ -109,11 +108,12 @@ private:
   // replace by new timeout_wheel for more effective perfomance [ O(1) ]
   //TimerTaskQueue timer_queue_;
 #endif
-  int32_t max_fds_;
 
   int32_t timestamp_;
 
   uint64_t loop_id_ = 0;
+
+  std::vector<FiredEvent> fired_list_;
 
   TimeoutWheel* timeout_wheel_ = nullptr;
 };

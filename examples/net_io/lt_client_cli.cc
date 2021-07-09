@@ -1,14 +1,15 @@
-#include <memory>
 #include <atomic>
 #include <functional>
-#include <glog/logging.h>
-#include <gflags/gflags.h>
-#include "net_io/clients/client.h"
-#include "base/coroutine/coroutine_runner.h"
-#include "net_io/codec/raw/raw_message.h"
-#include "net_io/codec/raw/raw_codec_service.h"
+#include <memory>
 
+#include "base/coroutine/co_runner.h"
 #include "fw_rapid_message.h"
+#include "net_io/clients/client.h"
+#include "net_io/codec/raw/raw_codec_service.h"
+#include "net_io/codec/raw/raw_message.h"
+
+#include <gflags/gflags.h>
+#include <glog/logging.h>
 #include <thirdparty/cameron_queue/blockingconcurrentqueue.h>
 
 using namespace lt;
@@ -39,27 +40,30 @@ void DoFwRapidRequest(std::string content) {
   raw_request->SetContent(content);
   FwRapidMessage* response = raw_router->SendRecieve(raw_request);
   if (response) {
-    std::cout << "res:" << response->Content()  << std::endl;
+    std::cout << "res:" << response->Content() << std::endl;
     message_queue.enqueue(response->Content());
   } else {
     std::cout << "err:" << raw_request->FailCode() << std::endl;
   }
 }
 
-
 DEFINE_string(remote, "", "scheme://host:port remote address");
 
 void CodecInitialize() {
   net::CodecFactory::RegisterCreator(
-    "rapid", [](base::MessageLoop* loop) -> net::RefCodecService {
-      auto service = std::make_shared<net::RawCodecService<FwRapidMessage>>(loop);
-      return std::static_pointer_cast<net::CodecService>(service);
-    });
+      "rapid",
+      [](base::MessageLoop* loop) -> net::RefCodecService {
+        auto service =
+            std::make_shared<net::RawCodecService<FwRapidMessage>>(loop);
+        return std::static_pointer_cast<net::CodecService>(service);
+      });
 }
 
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-  gflags::SetUsageMessage("usage: ./lt_client_cli --remote=scheme://host:port[?[supported queries]]");
+  gflags::SetUsageMessage(
+      "usage: ./lt_client_cli --remote=scheme://host:port[?[supported "
+      "queries]]");
 
   if (FLAGS_remote.empty()) {
     gflags::ShowUsageWithFlags(argv[0]);
@@ -100,9 +104,9 @@ int main(int argc, char** argv) {
     }
 
     if (server_info.protocol == "raw") {
-      CO_GO &mainloop << std::bind(&DoLtRawRequest, content);
+      CO_GO& mainloop << std::bind(&DoLtRawRequest, content);
     } else {
-      CO_GO &mainloop << std::bind(&DoFwRapidRequest, content);
+      CO_GO& mainloop << std::bind(&DoFwRapidRequest, content);
     }
 
     std::string response;

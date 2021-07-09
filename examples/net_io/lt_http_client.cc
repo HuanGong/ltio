@@ -1,13 +1,15 @@
-#include <gflags/gflags.h>
-#include <glog/logging.h>
 #include <atomic>
 #include <functional>
 #include <memory>
-#include "base/coroutine/coroutine_runner.h"
+
+#include "base/coroutine/co_runner.h"
 #include "base/coroutine/wait_group.h"
 #include "net_io/clients/client.h"
 #include "net_io/codec/http/http_request.h"
 #include "net_io/codec/http/http_response.h"
+
+#include <gflags/gflags.h>
+#include <glog/logging.h>
 
 using namespace lt;
 using base::MessageLoop;
@@ -76,7 +78,7 @@ int main(int argc, char** argv) {
       continue;
     }
     done = false;
-    CO_GO [&]() {
+    CO_GO[&]() {
       auto http_request = std::make_shared<lt::net::HttpRequest>();
       http_request->SetMethod("GET");
       http_request->SetRequestURL("/ping");
@@ -87,7 +89,8 @@ int main(int argc, char** argv) {
       LOG_IF(INFO, res) << "response:" << res->Dump();
       done = true;
     };
-    while(!done) sleep(0);
+    while (!done)
+      sleep(0);
   };
   background.WaitLoopEnd();
 }

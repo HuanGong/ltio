@@ -40,6 +40,10 @@ void TimeoutEvent::UpdateInterval(int64_t ms) {
   interval = ms;
 }
 
+base::TaskBasePtr TimeoutEvent::MoveInvoker() {
+  return std::move(timer_handler_);
+}
+
 void TimeoutEvent::Invoke() {
   if (timer_handler_) {
     timer_handler_->Run();

@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <stdio.h>    // snprintf
 #include <strings.h>  // bzero
 #include <sys/socket.h>
@@ -274,6 +275,11 @@ void KeepAlive(SocketFd fd, bool alive) {
   int optval = alive ? 1 : 0;
   ::setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &optval,
                static_cast<socklen_t>(sizeof optval));
+}
+
+void TCPNoDelay(SocketFd fd) {
+  int on = 1;
+  ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void *)&on, sizeof(on));
 }
 
 }  // namespace socketutils

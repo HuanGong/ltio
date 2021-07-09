@@ -15,12 +15,11 @@
  * limitations under the License.
  */
 
-#include "glog/logging.h"
-
-#include <base/coroutine/coroutine_runner.h>
-#include <base/message_loop/message_loop.h>
 #include "codec_message.h"
 #include "codec_service.h"
+#include "glog/logging.h"
+
+#include <base/message_loop/message_loop.h>
 
 namespace lt {
 namespace net {
@@ -28,7 +27,8 @@ namespace net {
 const RefCodecMessage CodecMessage::kNullMessage;
 
 CodecMessage::CodecMessage(MessageType type)
-  : type_(type), fail_code_(kSuccess) {
+  : type_(type),
+    fail_code_(kSuccess) {
   work_context_.loop = NULL;
 }
 

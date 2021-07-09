@@ -19,13 +19,10 @@
 #define BASE_COROUTINE_SCHEDULER_H_H_
 
 #include <cinttypes>
-#include <map>
-#include <set>
 #include <vector>
 
 #include <base/base_micro.h>
 #include <base/message_loop/message_loop.h>
-#include "coroutine.h"
 
 namespace base {
 
@@ -43,13 +40,15 @@ namespace base {
  * when invoke the G(CoroTask), P(CoroRunner) will choose a suitable
  * M to excute the task
  * */
+class Coroutine;
 
 class CoroRunner : public PersistRunner {
 public:
+
   typedef struct _go {
     _go(const char* func, const char* file, int line)
       : location_(func, file, line),
-        target_loop_(_go::loop()) {}
+        target_loop_(MessageLoop::Current()) {}
 
     /* specific a loop for this task*/
     inline _go& operator-(MessageLoop* loop) {
@@ -64,37 +63,35 @@ public:
      * */
     template <typename Functor>
     inline void operator-(Functor func) {
-      CoroRunner::ScheduleTask(CreateClosure(location_, func));
-      target_loop_->WakeUpIfNeeded();
+      CoroRunner::Publish(CreateClosure(location_, func));
+      loop()->WakeUpIfNeeded();
     }
 
     // here must make sure all things wrapper(copy) into closue,
     // becuase __go object will destruction before task closure run
     template <typename Functor>
     inline void operator<<(Functor closure_fn) {
-      auto func = [=](MessageLoop* loop, const Location& location) {
+      //NOTE: this is more slow than publish a task
+      auto func = [closure_fn](const Location& location) {
         CoroRunner& runner = CoroRunner::instance();
         runner.AppendTask(CreateClosure(location, closure_fn));
-        // loop->WakeUpIfNeeded(); //see message loop nested task sequence
       };
-      target_loop_->PostTask(location_, func, target_loop_, location_);
+      loop()->PostTask(location_, func, location_);
     }
 
-    inline static MessageLoop* loop() {
-      MessageLoop* current = MessageLoop::Current();
-      return current ? current : CoroRunner::backgroup();
+    inline MessageLoop* loop() {
+      return target_loop_ ? target_loop_ : CoroRunner::backgroup();
     }
     Location location_;
     MessageLoop* target_loop_ = nullptr;
   } _go;
-
 public:
   friend class _go;
 
   // run other task if current task occupy cpu too long
   // if task running time > us, runner will give up cpu
   // and then run a task in pending queue
-  static void Sched(int64_t us = 2500);
+  static void Sched(int64_t us = 5000);
 
   static void Yield();
 
@@ -104,29 +101,16 @@ public:
 
   static void Sleep(uint64_t ms);
 
+  static bool Publish(TaskBasePtr&& task);
+
   /* here two ways register as runner worker
    * 1. implicit call CoroRunner::instance()
-   * 2. call RegisteAsCoroWorker manually
+   * 2. call RegisteRunner manually
    * */
-  static void RegisteAsCoroWorker(MessageLoop*);
+  static void RegisteRunner(MessageLoop*);
 
-  static bool ScheduleTask(TaskBasePtr&& task);
-
-protected:
-#ifdef USE_LIBACO_CORO_IMPL
-  static void CoroutineEntry();
-#else
-  static void CoroutineEntry(void* coro);
-#endif
-
-  static CoroRunner& instance();
-
-  static MessageLoop* backgroup();
-
-  static ConcurrentTaskQueue remote_queue_;
-
-  CoroRunner();
-  ~CoroRunner();
+public:
+  virtual ~CoroRunner();
 
   /* override from MessageLoop::PersistRunner
    * load(bind) task(cargo) to coroutine(car) and run(transfer)
@@ -136,74 +120,46 @@ protected:
   /* override from MessageLoop::PersistRunner*/
   void LoopGone(MessageLoop* loop) override;
 
-  void AppendTask(TaskBasePtr&& task);
+  void ScheduleTask(TaskBasePtr&& tsk) override;
 
-  /* release the coroutine memory */
-  void GcAllCachedCoroutine();
+  void AppendTask(TaskBasePtr&& task, bool front = false);
 
-  /* append to a cached-list waiting for gc */
-  void Append2GCCache(Coroutine* co) { cached_gc_coros_.emplace_back(co); };
-
-  bool StealingTasks();
-
-  /* check whether still has pending task need to run
-   * case 0: still has pending task need to run
-   *  return true at once
-   * case 1: no pending task need to run
-   *    1.1: enough coroutine(task executor)
-   *      return false; then corotuine will end its life time
-   *    1.2: just paused this corotuine, and wait task to resume it
-   *      return true
-   */
-  bool ContinueRun();
-
-  size_t InQueueTaskCount() const { return sched_tasks_.size(); }
-
-  size_t NoneRemoteTaskCount() const { return coro_tasks_.size(); }
-
-  /* retrieve task from inloop queue or public task pool*/
-  bool GetTask(TaskBasePtr& task);
+  size_t task_count() const;
 
   /* from stash list got a coroutine or create new one*/
-  Coroutine* RetrieveCoroutine();
+  Coroutine* Spawn();
 
-  /* a callback function using for resume a kPaused coroutine */
-  void Resume(WeakCoroutine& coro, uint64_t id);
+  void FreeCoros();
+protected:
+  static CoroRunner& instance();
 
-  /* do resume a coroutine from main_coro*/
-  void DoResume(WeakCoroutine& coro, uint64_t id);
+  static MessageLoop* backgroup();
 
-private:
+  CoroRunner();
+
   /* switch call stack from different coroutine*/
   void switch_context(Coroutine* next);
 
-  bool in_main_coro() const { return main_coro_ == current_; }
+  bool in_main_coro() const { return current_ == main_; }
 
-  size_t task_count() const {
-    return coro_tasks_.size() + remote_queue_.size_approx();
-  }
-
-private:
+  Coroutine* main_;
   Coroutine* current_;
-  RefCoroutine main_;
-  Coroutine* main_coro_;
 
   MessageLoop* bind_loop_;
 
-  // executor task list
-  std::list<TaskBasePtr> coro_tasks_;
+  // resume task pending to this
+  TaskQueue ready_queue_;
 
   // scheduled task list
-  std::list<TaskBasePtr> sched_tasks_;
-
-  std::vector<Coroutine*> cached_gc_coros_;
+  TaskQueue remote_sched_;
+  // nested task
+  std::vector<TaskBasePtr> sched_tasks_;
 
   /* every thread max resuable coroutines*/
   size_t max_parking_count_;
   std::list<Coroutine*> parking_coros_;
 
-  /* we hardcode a max cpu preempt time 2ms */
-  size_t stealing_counter_ = 0;
+  std::vector<Coroutine*> cached_gc_coros_;
   DISALLOW_COPY_AND_ASSIGN(CoroRunner);
 };
 

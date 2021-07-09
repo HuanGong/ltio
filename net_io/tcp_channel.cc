@@ -26,7 +26,7 @@
 #include "socket_utils.h"
 
 namespace {
-const int32_t kBlockSize = 4 * 1024;
+const int32_t kBlockSize = 2 * 1024;
 }
 
 namespace lt {
@@ -44,6 +44,7 @@ TcpChannel::TcpChannel(int socket_fd,
                        const IPEndPoint& peer)
   : SocketChannel(socket_fd, loc, peer) {
   fd_event_->SetEdgeTrigger(true);
+  socketutils::TCPNoDelay(socket_fd);
   socketutils::KeepAlive(socket_fd, true);
 }
 
@@ -61,25 +62,26 @@ bool TcpChannel::HandleRead(base::FdEvent* event) {
 
     bytes_read = ::read(fd_event_->GetFd(), in_buffer_.GetWrite(),
                         in_buffer_.CanWriteSize());
-    int err = errno;
-    VLOG(GLOG_VTRACE) << ChannelInfo() << " read [" << bytes_read << "] bytes";
-
     if (bytes_read > 0) {
+      VLOG(GLOG_VTRACE) << ChannelInfo() << " read [" << bytes_read << "] bytes";
       in_buffer_.Produce(bytes_read);
       continue;
     }
-    if (0 == bytes_read) {
+
+    VLOG(GLOG_VTRACE) << ChannelInfo() << " read err:" << base::StrError();
+    if (errno == EAGAIN) {
+      break;
+    }
+    if (bytes_read == 0) { //peer close
       need_close = true;
       break;
     }
-
-    if (err != EAGAIN) {
+    if (EINTR != errno) {
       need_close = true;
       LOG(ERROR) << ChannelInfo() << " read error:" << base::StrError();
+      break;
     }
-    break;
-
-  } while (1);
+  } while (true);
 
   if (in_buffer_.CanReadSize()) {
     reciever_->OnDataReceived(this, &in_buffer_);
@@ -99,29 +101,33 @@ bool TcpChannel::HandleWrite(base::FdEvent* event) {
   int fatal_err = 0;
   int socket_fd = fd_event_->GetFd();
 
+  ssize_t writen_bytes = 0;
   while (out_buffer_.CanReadSize()) {
-    ssize_t writen_bytes = socketutils::Write(socket_fd, out_buffer_.GetRead(),
-                                              out_buffer_.CanReadSize());
-
-    if (writen_bytes < 0) {
-      if (errno != EAGAIN) {
-        fatal_err = errno;
-      }
-      break;
+    writen_bytes = socketutils::Write(socket_fd,
+                                      out_buffer_.GetRead(),
+                                      out_buffer_.CanReadSize());
+    if (writen_bytes > 0) {
+      out_buffer_.Consume(writen_bytes);
+      continue;
     }
-    out_buffer_.Consume(writen_bytes);
+    if (errno == EINTR) {
+      VLOG(GLOG_VTRACE) << ChannelInfo() << " EINTR continue";
+      continue;
+    }
+    if (errno != EAGAIN) {
+      fatal_err = errno;
+    }
+    break;
   };
 
   if (fatal_err != 0) {
-    LOG(ERROR) << __FUNCTION__ << ChannelInfo()
+    LOG(ERROR) << ChannelInfo()
                << " write err:" << base::StrError(fatal_err);
     return HandleClose(event);
   }
 
   if (out_buffer_.CanReadSize() == 0) {
-    fd_event_->DisableWriting();
     reciever_->OnDataFinishSend(this);
-
     if (schedule_shutdown_) {
       return HandleClose(event);
     }
@@ -138,42 +144,42 @@ int32_t TcpChannel::Send(const char* data, const int32_t len) {
 
   if (out_buffer_.CanReadSize() > 0) {
     out_buffer_.WriteRawData(data, len);
-
-    fd_event_->EnableWriting();
-    return 0;  // all write to buffer, zero write to fd
+    HandleWrite(fd_event_.get());
+    return len;
   }
 
   int32_t fatal_err = 0;
   size_t n_write = 0;
   size_t n_remain = len;
-
   do {
     ssize_t part_write =
         socketutils::Write(fd_event_->GetFd(), data + n_write, n_remain);
+    if (part_write > 0) {
+      n_write += part_write;
+      n_remain = n_remain - part_write;
 
-    if (part_write < 0) {
-      if (errno == EAGAIN) {
-        out_buffer_.WriteRawData(data + n_write, n_remain);
-
-      } else {
-        // to avoid A -> B -> callback delete A problem,
-        // use a write event to triggle handle close action
-        fatal_err = errno;
-        schedule_shutdown_ = true;
-        SetChannelStatus(Status::CLOSING);
-        fd_event_->EnableWriting();
-        LOG(ERROR) << ChannelInfo() << " send err:" << base::StrError()
-                   << " schedule close";
-      }
-      break;
+      DCHECK((n_write + n_remain) == size_t(len));
+      continue;
     }
-    n_write += part_write;
-    n_remain = n_remain - part_write;
+    if (errno == EINTR) {
+      continue;
+    }
 
-    DCHECK((n_write + n_remain) == size_t(len));
+    if (errno == EAGAIN) {
+      out_buffer_.WriteRawData(data + n_write, n_remain);
+    } else {
+      // to avoid A -> B -> callback delete A problem,
+      // use a write event to triggle handle close action
+      fatal_err = errno;
+      schedule_shutdown_ = true;
+      SetChannelStatus(Status::CLOSING);
+      LOG(ERROR) << ChannelInfo() << " send err:" << base::StrError()
+        << " schedule close";
+    }
+    break;
   } while (n_remain != 0);
 
-  if (out_buffer_.CanReadSize() && (!fd_event_->IsWriteEnable())) {
+  if (out_buffer_.CanReadSize()) {
     fd_event_->EnableWriting();
   }
   return fatal_err != 0 ? -1 : n_write;

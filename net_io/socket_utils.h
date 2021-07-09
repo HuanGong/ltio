@@ -66,6 +66,7 @@ bool ReUseSocketPort(SocketFd, bool reuse);
 bool ReUseSocketAddress(SocketFd socket_fd, bool reuse);
 
 void KeepAlive(SocketFd, bool alive);
+void TCPNoDelay(SocketFd fd);
 }  // namespace socketutils
 }  // namespace net
 }  // namespace lt

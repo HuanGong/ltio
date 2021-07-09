@@ -22,32 +22,41 @@
 
 #include "event.h"
 #include "fd_event.h"
+#include "fdev_mgr.h"
 #include "io_multiplexer.h"
 
 namespace base {
 
 class IOMuxEpoll : public IOMux {
 public:
-  IOMuxEpoll(int32_t max_fds);
+  IOMuxEpoll();
   ~IOMuxEpoll();
 
   FdEvent* FindFdEvent(int fd) override;
+
   void AddFdEvent(FdEvent* fd_ev) override;
+
   void DelFdEvent(FdEvent* fd_ev) override;
+
   void UpdateFdEvent(FdEvent* fd_ev) override;
 
-  int WaitingIO(FiredEvent* active_list, int32_t timeout_ms) override;
+  int WaitingIO(FiredEvList& out, int32_t ms) override;
 
 private:
   int EpollCtl(FdEvent* ev, int opt);
+
   LtEvent ToLtEvent(const uint32_t epoll_ev);
+
   uint32_t ToEpollEvent(const LtEvent& lt_ev, bool add_extr = true);
+
   std::string EpollOptToString(int opt);
 
 private:
-  int epoll_fd_ = -1;
-  std::vector<FdEvent*> lt_events_;
-  std::vector<epoll_event> ep_events_;
+  FdEventMgr& fd_mgr_;
+
+  int epoll_ = -1;
+
+  std::vector<epoll_event> ep_evs_;
 };
 
 }  // namespace base

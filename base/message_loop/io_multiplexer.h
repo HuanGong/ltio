@@ -34,13 +34,15 @@ typedef struct FiredEvent {
     event_mask = LT_EVENT_NONE;
   }
 } FiredEvent;
+using FiredEvList = std::vector<FiredEvent>;
 
 class IOMux : public FdEvent::Watcher {
 public:
   IOMux();
   virtual ~IOMux();
 
-  virtual int WaitingIO(FiredEvent* start, int32_t timeout_ms) = 0;
+  // return active event count, and fired event store to out
+  virtual int WaitingIO(FiredEvList& out, int32_t ms) = 0;
 
   virtual void AddFdEvent(FdEvent* fd_ev) = 0;
   virtual void DelFdEvent(FdEvent* fd_ev) = 0;

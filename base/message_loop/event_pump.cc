@@ -36,15 +36,13 @@ thread_local uint64_t tid_ = 0;  // assign with current run loop
 
 EventPump::EventPump() : EventPump(NULL) {}
 
-EventPump::EventPump(PumpDelegate* d) : delegate_(d), running_(false) {
-  struct rlimit limit;
-  if (0 != getrlimit(RLIMIT_NOFILE, &limit)) {
-    max_fds_ = 65535;
-  } else {
-    max_fds_ = limit.rlim_cur;
-  }
+EventPump::EventPump(PumpDelegate* d)
+  : delegate_(d),
+    running_(false),
+    fired_list_(65535) {
+
   InitializeTimeWheel();
-  io_mux_.reset(new base::IOMuxEpoll(max_fds_));
+  io_mux_.reset(new base::IOMuxEpoll());
 }
 
 EventPump::~EventPump() {
@@ -57,29 +55,43 @@ EventPump::~EventPump() {
 void EventPump::PrepareRun() {
   tid_ = loop_id_;
   CHECK(loop_id_);
+  IgnoreSigPipeSignalOnCurrentThread();
+}
+
+void EventPump::RunOnce() {
+  CHECK(IsInLoop());
+
+  timeout_t ms = NextTimeout();
+  int count = io_mux_->WaitingIO(fired_list_, ms);
+
+  ProcessTimerEvent();
+
+  InvokeFiredEvent(&fired_list_[0], count);
+
+  if (delegate_) {
+    delegate_->RunNestedTask();
+  }
 }
 
 void EventPump::Run() {
   running_ = true;
-  IgnoreSigPipeSignalOnCurrentThread();
 
   timeout_t next_timeout = 0;
-  FiredEvent* active_list = new FiredEvent[max_fds_];
   while (running_) {
     next_timeout = NextTimeout();
-    int count = io_mux_->WaitingIO(active_list, next_timeout);
+
+    int count = io_mux_->WaitingIO(fired_list_, next_timeout);
 
     ProcessTimerEvent();
 
-    InvokeFiredEvent(active_list, count);
+    InvokeFiredEvent(&fired_list_[0], count);
 
     if (delegate_) {
       delegate_->RunNestedTask();
     }
-    ProcessTimerEvent();
   }
   running_ = false;
-  delete[] active_list;
+  fired_list_.clear();
   FinalizeTimeWheel();
 }
 

@@ -38,6 +38,10 @@ public:
   ~TimeoutEvent();
 
   void Invoke();
+
+  // use on coro task
+  base::TaskBasePtr MoveInvoker();
+
   void UpdateInterval(int64_t ms);
   void InstallTimerHandler(TaskBasePtr&& h);
   bool IsRepeated() const { return flags & TIMEOUT_INT; }

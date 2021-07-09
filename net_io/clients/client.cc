@@ -19,12 +19,12 @@
 #include <algorithm>
 
 #include "base/base_constants.h"
-#include "base/coroutine/coroutine_runner.h"
+#include "base/coroutine/co_runner.h"
 #include "base/utils/string/str_utils.h"
 #include "client_channel.h"
-#include "glog/logging.h"
 #include "net_io/tcp_channel.h"
 
+#include "glog/logging.h"
 #ifdef LTIO_HAVE_SSL
 #include <memory>
 #include "net_io/tcp_channel_ssl.h"
@@ -89,7 +89,6 @@ void Client::Finalize() {
 
   auto channels = std::atomic_load(&in_use_channels_);
   for (RefClientChannel& ch : *channels) {
-
     base::MessageLoop* loop = ch->IOLoop();
     // this close will success and client detach with it,
     // no any notify callback will be called any more
@@ -198,8 +197,7 @@ void Client::OnConnected(int socket_fd, IPEndPoint& local, IPEndPoint& remote) {
       new ClientChannelList(channels_.begin(), channels_.end()));
   channels_count_.store(new_list->size());
   std::atomic_store(&in_use_channels_, new_list);
-  VLOG(GLOG_VINFO) << ClientInfo()
-                   << " connected, initializing...";
+  VLOG(GLOG_VINFO) << ClientInfo() << " connected, initializing...";
 
   launch_next_if_need();
 }
@@ -254,7 +252,8 @@ void Client::OnRequestGetResponse(const RefCodecMessage& request,
   request->GetWorkCtx().resumer_fn();
 }
 
-bool Client::AsyncDoRequest(const RefCodecMessage& req, AsyncCallBack callback) {
+bool Client::AsyncDoRequest(const RefCodecMessage& req,
+                            AsyncCallBack callback) {
   base::MessageLoop* worker = next_client_io_loop();
   CHECK(worker);
 

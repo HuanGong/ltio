@@ -16,9 +16,9 @@
  */
 
 #include "wait_group.h"
+#include "co_runner.h"
 
 #include <base/message_loop/message_loop.h>
-#include "coroutine_runner.h"
 
 namespace base {
 
@@ -79,6 +79,7 @@ WaitGroup::Result WaitGroup::Wait(int64_t timeout_ms) {
     timeout_->InstallTimerHandler(NewClosure(std::move(functor)));
     loop_->Pump()->AddTimeoutEvent(timeout_.get());
   }
+
   CO_YIELD;
 
   if (timeout_) {

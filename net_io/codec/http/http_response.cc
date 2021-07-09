@@ -57,7 +57,7 @@ const KeyValMap& HttpResponse::Headers() const {
   return headers_;
 }
 
-bool HttpResponse::HasHeaderField(const std::string field) const {
+bool HttpResponse::HasHeaderField(const std::string& field) const {
   return headers_.find(field) != headers_.end();
 }
 

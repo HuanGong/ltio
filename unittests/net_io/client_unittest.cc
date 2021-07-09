@@ -3,7 +3,7 @@
 #include <atomic>
 #include <iostream>
 
-#include <base/coroutine/coroutine_runner.h>
+#include <base/coroutine/co_runner.h>
 #include <base/message_loop/message_loop.h>
 #include <base/time/time_utils.h>
 #include <base/utils/string/str_utils.h>
@@ -332,7 +332,7 @@ TEST_CASE("client.timer.request", "[fetch resource every interval]") {
                      10000);
 
   loop.WaitLoopEnd();
-  LOG(INFO) << "system co count:" << base::CoroBase::SystemCoroutineCount();
+  //LOG(INFO) << "system co count:" << base::CoroBase::SystemCoroutineCount();
 
   LOG(INFO) << " end test client.timer.request, raw client send request";
 }

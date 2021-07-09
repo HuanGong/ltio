@@ -45,7 +45,12 @@ class MessageLoop;
 class PersistRunner {
 public:
   virtual void Run() = 0;
+
   virtual void LoopGone(MessageLoop* loop){};
+
+  virtual void ScheduleTask(base::TaskBasePtr&& tsk) = 0;
+private:
+  LtClosure notifier_;
 };
 
 class MessageLoop : public PumpDelegate, public FdEvent::Handler {
@@ -106,6 +111,8 @@ public:
   bool IsInLoopThread() const;
 
   void WakeUpIfNeeded();
+
+  PersistRunner* DelegateRunner();
   void InstallPersistRunner(PersistRunner* runner);
   // t: millsecond for giveup cpu for waiting
   void WaitLoopEnd(int32_t t = 1);
@@ -121,9 +128,9 @@ private:
   void ThreadMain();
   void SetThreadNativeName();
 
-  bool PendingNestedTask(TaskBasePtr&& task);
-
   void RunCommandTask(ScheduledTaskType t);
+
+  size_t PendingTasksCount() const;
 
   // nested task: post another task in current loop
   // override from pump for nested task;
@@ -151,10 +158,10 @@ private:
   RefFdEvent task_event_;
   std::atomic_flag notify_flag_;
 
-  ConcurrentTaskQueue scheduled_tasks_;
+  TaskQueue scheduled_tasks_;
   std::vector<TaskBasePtr> in_loop_tasks_;
 
-  std::list<PersistRunner*> persist_runner_;
+  PersistRunner* delegate_runner_ = nullptr;
 
   // pipe just use for loop control
   int wakeup_pipe_in_ = -1;

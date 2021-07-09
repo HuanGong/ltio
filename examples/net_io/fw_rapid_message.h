@@ -1,10 +1,13 @@
 #ifndef _LT_FW_RAPID_MESSAGE_H_
 #define _LT_FW_RAPID_MESSAGE_H_
 
-#include <glog/logging.h>
-#include <net_io/codec/codec_message.h>
 #include <sstream>
 #include <string>
+
+#include <net_io/channel.h>
+#include <net_io/codec/codec_message.h>
+
+#include <glog/logging.h>
 
 using namespace lt;
 

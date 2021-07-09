@@ -8,7 +8,7 @@ namespace lt {
 namespace net {
 
 namespace {
-const int32_t kBlockSize = 2 * 1024;
+const int32_t kBlockSize = 8 * 1024;
 
 enum class SSLAction {
   Close,
@@ -80,6 +80,7 @@ TCPSSLChannel::TCPSSLChannel(int socket_fd,
                              const IPEndPoint& loc,
                              const IPEndPoint& peer)
   : SocketChannel(socket_fd, loc, peer) {
+  fd_event_->EnableWriting();
   fd_event_->SetEdgeTrigger(true);
   socketutils::KeepAlive(socket_fd, true);
 }
@@ -118,7 +119,7 @@ int32_t TCPSSLChannel::Send(const char* data, const int32_t len) {
 
   if (out_buffer_.CanReadSize() > 0) {
     out_buffer_.WriteRawData(data, len);
-    fd_event_->EnableWriting();
+    HandleWrite(fd_event_.get());
     return 0;  // all write to buffer, zero write to fd
   }
 
@@ -152,7 +153,6 @@ int32_t TCPSSLChannel::Send(const char* data, const int32_t len) {
 
   if (action == SSLAction::Close) {
     schedule_shutdown_ = true;
-    fd_event_->EnableWriting();
     SetChannelStatus(Status::CLOSING);
   }
   return action == SSLAction::Close ? -1 : n_write;
@@ -209,9 +209,7 @@ bool TCPSSLChannel::HandleWrite(base::FdEvent* event) {
   }
 
   if (out_buffer_.CanReadSize() == 0) {
-    fd_event_->DisableWriting();
     reciever_->OnDataFinishSend(this);
-
     if (schedule_shutdown_) {
       return HandleClose(event);
     }
@@ -227,7 +225,7 @@ bool TCPSSLChannel::HandleRead(base::FdEvent* event) {
 
   SSLAction action = SSLAction::WaitIO;
   do {
-    in_buffer_.EnsureWritableSize(kBlockSize);
+    in_buffer_.EnsureWritableSize(2048);
 
     ERR_clear_error();
     bytes_read = SSL_read(ssl_, in_buffer_.GetWrite(), in_buffer_.CanWriteSize());

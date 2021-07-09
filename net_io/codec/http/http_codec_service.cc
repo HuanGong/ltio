@@ -21,15 +21,22 @@
 #include <net_io/io_buffer.h>
 #include <net_io/tcp_channel.h>
 #include "base/message_loop/message_loop.h"
+#include "fmt/core.h"
 #include "glog/logging.h"
 #include "http_constants.h"
 
 namespace lt {
 namespace net {
 
+namespace {
 static const int32_t kMeanHeaderSize = 32;
-static const int32_t kHttpMsgReserveSize = 64;
-static const int32_t kCompressionThreshold = 4096;
+static const int32_t kHttpMsgReserveSize = 512;
+static const int32_t kCompressionThreshold = 8096;
+
+const char* kHTTP_RESPONSE_HEADER_1_1 = "HTTP/1.1";
+const char* kHTTP_RESPONSE_HEADER_1_0 = "HTTP/1.0";
+// HTTP/1.1 200 \r\n
+}  // namespace
 
 // static
 http_parser_settings HttpCodecService::req_parser_settings_ = {
@@ -187,20 +194,13 @@ bool HttpCodecService::RequestToBuffer(const HttpRequest* request,
   guess_size += request->Headers().size() * kMeanHeaderSize;
   buffer->EnsureWritableSize(guess_size);
 
-  buffer->WriteString(request->Method());
-  buffer->WriteString(HttpConstant::kBlankSpace);
-  buffer->WriteString(request->RequestUrl());
-  buffer->WriteString(HttpConstant::kBlankSpace);
-
-  char v[11];  //"HTTP/1.1\r\n"
-  snprintf(v, 11, "HTTP/1.%d\r\n", request->VersionMinor() == 1 ? 1 : 0);
-  buffer->WriteRawData(v, 10);
+  buffer->WriteString(fmt::format("{} {} HTTP/1.{}",
+                                  request->Method(),
+                                  request->RequestUrl(),
+                                  request->VersionMinor()));
 
   for (const auto& header : request->Headers()) {
-    buffer->WriteString(header.first);
-    buffer->WriteRawData(": ", 2);
-    buffer->WriteString(header.second);
-    buffer->WriteString(HttpConstant::kCRCN);
+    buffer->WriteString(fmt::format("{}: {}\r\n", header.first, header.second));
   }
 
   if (!request->HasHeaderField(HttpConstant::kConnection)) {
@@ -214,11 +214,9 @@ bool HttpCodecService::RequestToBuffer(const HttpRequest* request,
   }
 
   if (!request->HasHeaderField(HttpConstant::kContentLength)) {
-    buffer->WriteString(HttpConstant::kContentLength);
-    std::string content_len(": ");
-    content_len.append(std::to_string(request->Body().size()));
-    content_len.append(HttpConstant::kCRCN);
-    buffer->WriteString(content_len);
+    buffer->WriteString(fmt::format("{}: {}\r\n",
+                                    HttpConstant::kContentLength,
+                                    request->Body().size()));
   }
 
   if (!request->HasHeaderField(HttpConstant::kContentType)) {
@@ -256,7 +254,9 @@ bool HttpCodecService::SendResponse(const CodecMessage* req,
     LOG(ERROR) << __FUNCTION__ << " failed encode:" << response->Dump();
     return false;
   }
-  VLOG(GLOG_VTRACE) << __FUNCTION__ << " write response:" << response->Dump();
+  VLOG(GLOG_VTRACE) << " write response:" << response->Dump();
+  VLOG(GLOG_VTRACE) << " response encode buf:"
+                    << channel_->WriterBuffer()->AsString();
   /* see: https://tools.ietf.org/html/rfc7230#section-6.1
 
    The "close" connection option is defined for a sender to signal that
@@ -273,29 +273,24 @@ bool HttpCodecService::SendResponse(const CodecMessage* req,
     channel_->ShutdownChannel(true);
   }
   return channel_->TryFlush();
-};
+}
 
 // static
 bool HttpCodecService::ResponseToBuffer(const HttpResponse* response,
                                         IOBuffer* buffer) {
   CHECK(response && buffer);
 
-  int32_t guess_size = kHttpMsgReserveSize +
-                       response->Headers().size() * kMeanHeaderSize +
-                       response->Body().size();
+  int32_t guess_size = kHttpMsgReserveSize + response->Body().size();
   buffer->EnsureWritableSize(guess_size);
 
-  std::ostringstream oss;
   int32_t code = response->ResponseCode();
-  oss << "HTTP/1." << response->VersionMinor() << " " << code << " "
-      << HttpConstant::StatusCodeCStr(code) << HttpConstant::kCRCN;
-  buffer->WriteString(oss.str());
-
+  const char* status_tail = HttpConstant::GetResponseStatusTail(code);
+  // HTTP/1.1 200 \r\n
+  buffer->WriteString(
+      fmt::format("HTTP/1.{} {}", response->VersionMinor(), status_tail));
+  // header: value
   for (const auto& header : response->Headers()) {
-    buffer->WriteString(header.first);
-    buffer->WriteRawData(": ", 2);
-    buffer->WriteString(header.second);
-    buffer->WriteString(HttpConstant::kCRCN);
+    buffer->WriteString(fmt::format("{}: {}\r\n", header.first, header.second));
   }
 
   if (!response->HasHeaderField(HttpConstant::kConnection)) {
@@ -305,11 +300,9 @@ bool HttpCodecService::ResponseToBuffer(const HttpResponse* response,
   }
 
   if (!response->HasHeaderField(HttpConstant::kContentLength)) {
-    std::string content_len(HttpConstant::kContentLength);
-    content_len.append(": ");
-    content_len.append(std::to_string(response->Body().size()));
-    content_len.append(HttpConstant::kCRCN);
-    buffer->WriteString(content_len);
+    buffer->WriteString(fmt::format("{}: {:d}\r\n",
+                                    HttpConstant::kContentLength,
+                                    response->Body().size()));
   }
 
   if (!response->HasHeaderField(HttpConstant::kContentType)) {

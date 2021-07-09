@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "base/base_micro.h"
-#include "base/coroutine/coroutine_runner.h"
+#include "base/coroutine/co_runner.h"
 #include "net_io/codec/codec_factory.h"
 #include "net_io/io_service.h"
 
@@ -172,8 +172,7 @@ protected:
     if (!Configurator::coro_process) {
       return handler_(Context::New(request));
     }
-    base::MessageLoop* io_loop = base::MessageLoop::Current();
-    CO_GO io_loop << std::bind(handler_, Context::New(request));
+    CO_GO std::bind(handler_, Context::New(request));
   }
 #ifdef LTIO_HAVE_SSL
 public:

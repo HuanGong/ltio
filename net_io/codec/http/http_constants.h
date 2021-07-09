@@ -40,7 +40,8 @@ struct HttpConstant {
   static const std::string kHeaderGzipEncoding;
   static const std::string kHeaderSupportedEncoding;
 
-  static const char* StatusCodeCStr(int32_t code);
+  // format: " 200 OK\r\n"
+  static const char* GetResponseStatusTail(int32_t code);
 };
 
 }  // namespace net

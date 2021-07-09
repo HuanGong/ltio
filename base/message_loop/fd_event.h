@@ -85,11 +85,12 @@ public:
   inline int GetFd() const { return fd_; };
   inline void ReleaseOwnership() { owner_fd_ = false; }
 
-  std::string EventInfo() const;
   LtEvent ActivedEvent() const { return revents_; };
+  void SetActivedEvent(LtEvent ev) {revents_ = ev;};
+
+  std::string EventInfo() const;
   std::string RcvEventAsString() const;
   std::string MonitorEventAsString() const;
-
 private:
   void notify_watcher();
 

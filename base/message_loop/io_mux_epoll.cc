@@ -16,44 +16,50 @@
  */
 
 #include "io_mux_epoll.h"
+#include "fdev_mgr.h"
+
+#include <base/utils/sys_error.h>
 
 #include "glog/logging.h"
 
-#include <base/utils/sys_error.h>
-#include "io_multiplexer.h"
-
 namespace base {
 
-static const int kMax_EPOLL_FD_NUM = 65535;
+namespace {
+  constexpr size_t kMaxFiredEvOnePoll = 65535;
+}
 
-IOMuxEpoll::IOMuxEpoll(int32_t max_fds)
-  : IOMux(), lt_events_(max_fds, NULL), ep_events_(kMax_EPOLL_FD_NUM) {
-  epoll_fd_ = ::epoll_create(kMax_EPOLL_FD_NUM);
+IOMuxEpoll::IOMuxEpoll()
+  : IOMux(),
+    fd_mgr_(FdEventMgr::Get()),
+    ep_evs_(kMaxFiredEvOnePoll) {
+  epoll_ = ::epoll_create(kMaxFiredEvOnePoll);
 }
 
 IOMuxEpoll::~IOMuxEpoll() {
-  ::close(epoll_fd_);
+  ::close(epoll_);
 }
 
-int IOMuxEpoll::WaitingIO(FiredEvent* active_list, int32_t timeout_ms) {
-  int turn_active_count =
-      ::epoll_wait(epoll_fd_, &ep_events_[0], kMax_EPOLL_FD_NUM, timeout_ms);
-
-  if (turn_active_count < 0) {  // error
+int IOMuxEpoll::WaitingIO(FiredEvList& out, int32_t ms) {
+  const int ret_count =
+      ::epoll_wait(epoll_, &ep_evs_[0], kMaxFiredEvOnePoll, ms);
+  if (ret_count < 0) {  // error
     int32_t err = errno;
-    LOG(ERROR) << "epoll fd:" << epoll_fd_
-               << " epoll_wait error:" << StrError(err);
+    LOG(ERROR) << "fd:" << epoll_ << " epoll_wait error:" << StrError(err);
     return 0;
   }
 
-  for (int idx = 0; idx < turn_active_count; idx++) {
-    struct epoll_event& ev = ep_events_[idx];
-    DCHECK(lt_events_[ev.data.fd] != NULL);
-
-    active_list[idx].fd_id = ev.data.fd;
-    active_list[idx].event_mask = ToLtEvent(ev.events);
+  if (out.size() < ret_count) {
+    out.resize(ret_count, {-1, LtEv::LT_EVENT_NONE});
   }
-  return turn_active_count;
+  for (int idx = 0; idx < ret_count; idx++) {
+    struct epoll_event& ev = ep_evs_[idx];
+    DCHECK(fd_mgr_.GetFdEvent(ev.data.fd) != NULL);
+
+    out[idx] = {ev.data.fd, ToLtEvent(ev.events)};
+    // fd_id = ev.data.fd;
+    // out[idx].event_mask = ToLtEvent(ev.events);
+  }
+  return ret_count;
 }
 
 LtEvent IOMuxEpoll::ToLtEvent(const uint32_t epoll_ev) {
@@ -93,36 +99,17 @@ uint32_t IOMuxEpoll::ToEpollEvent(const LtEvent& lt_ev, bool add_extr) {
 }
 
 FdEvent* IOMuxEpoll::FindFdEvent(int fd) {
-  if (fd >= 0 && fd < lt_events_.size()) {
-    return lt_events_[fd];
-  }
-  LOG(ERROR) << __FUNCTION__ << " out of range file descriptor";
-  return NULL;
+  return fd_mgr_.GetFdEvent(fd);
 }
 
 void IOMuxEpoll::AddFdEvent(FdEvent* fd_ev) {
-  int32_t fd = fd_ev->GetFd();
-
-  CHECK((fd >= 0) && (fd < lt_events_.size()));
-
+  CHECK(fd_mgr_.Add(fd_ev) == FdEventMgr::Success);
   EpollCtl(fd_ev, EPOLL_CTL_ADD);
-
-  if (lt_events_[fd] != NULL && lt_events_[fd] != fd_ev) {
-    LOG(ERROR) << __FUNCTION__ << " override a exsist fdevent"
-               << ", origin:" << lt_events_[fd] << " new:" << fd_ev;
-  }
-  lt_events_[fd] = fd_ev;
 }
 
 void IOMuxEpoll::DelFdEvent(FdEvent* fd_ev) {
   EpollCtl(fd_ev, EPOLL_CTL_DEL);
-
-  int32_t fd = fd_ev->GetFd();
-  if (lt_events_[fd] == fd_ev) {
-    lt_events_[fd] = NULL;
-  } else {
-    LOG(ERROR) << "Attept Remove A None-Exsist FdEvent";
-  }
+  fd_mgr_.Remove(fd_ev);
 }
 
 void IOMuxEpoll::UpdateFdEvent(FdEvent* fd_ev) {
@@ -131,8 +118,8 @@ void IOMuxEpoll::UpdateFdEvent(FdEvent* fd_ev) {
     return;
   }
   int32_t fd = fd_ev->GetFd();
-  if (lt_events_[fd] == NULL) {
-    lt_events_[fd] = fd_ev;
+  if (fd_mgr_.GetFdEvent(fd_ev->GetFd()) == NULL) {
+    fd_mgr_.Add(fd_ev);
   }
 }
 
@@ -147,8 +134,7 @@ int IOMuxEpoll::EpollCtl(FdEvent* fdev, int opt) {
     ev.events |= EPOLLET;
   }
 
-  int ret = ::epoll_ctl(epoll_fd_, opt, fd, &ev);
-
+  int ret = ::epoll_ctl(epoll_, opt, fd, &ev);
   LOG_IF(ERROR, ret != 0) << "apply epoll_ctl opt " << EpollOptToString(opt)
                           << " on fd " << fd
                           << " failed, errno:" << StrError(errno)

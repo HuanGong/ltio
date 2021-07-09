@@ -11,7 +11,6 @@
 #include "base/message_loop/timer_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/linux_signal.h"
-#include "base/coroutine/coroutine_runner.h"
 
 bool LocationTaskTest() {
   base::MessageLoop loop;
