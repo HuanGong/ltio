@@ -12,11 +12,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CONFIG_DIR}/Modules)
 option(LTIO_BUILD_EXAMPLES "Build UNITTEST" ON)
 option(LTIO_BUILD_UNITTESTS "Build UNITTEST" ON)
 option(LTIO_BUILD_SHARED_LIBS "Build shared libraries" ON)
-option(LTIO_USE_ACO_CORO_IMPL "enabel ltaco coroutine implement" OFF)
-
 option(LTIO_WITH_OPENSSL "support ssl by openssl" OFF)
-
-#include(external/CMakeLists.txt)
 
 include(ExternalProject)
 include(GNUInstallDirs)

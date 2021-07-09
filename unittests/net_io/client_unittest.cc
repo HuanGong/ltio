@@ -332,7 +332,7 @@ TEST_CASE("client.timer.request", "[fetch resource every interval]") {
                      10000);
 
   loop.WaitLoopEnd();
-  LOG(INFO) << "system co count:" << base::CoroBase::SystemCoroutineCount();
+  //LOG(INFO) << "system co count:" << base::CoroBase::SystemCoroutineCount();
 
   LOG(INFO) << " end test client.timer.request, raw client send request";
 }

@@ -153,48 +153,80 @@ int64_t start_time;
 static std::int64_t counter = 0;
 static const std::int64_t kTaskCount = 10000000;
 
-void invoke(base::MessageLoop* loop, bool coro) {
+enum BenchMode {
+  LOOP,
+  CORO,
+  CORO_WITH_LOOP,
+};
+
+void invoke(base::MessageLoop* loop, BenchMode mode) {
   if (counter++ == kTaskCount) {
     int64_t diff = base::time_us() - start_time;
-    int64_t task_per_second = kTaskCount * counter / diff;
-    LOG(INFO) << "coro task one by one bench:" << (coro ? "true" : "false")
-              << ", total:" << diff << ", " << task_per_second << "/sec";
+    int64_t tps = kTaskCount * counter / diff;
+    LOG(INFO) << "one by one bench, mode:" << mode
+              << ", total:" << diff << ", " << tps << "/sec";
     loop->QuitLoop();
     return;
   };
 
-  if (coro) {
-    CO_GO loop << std::bind(invoke, loop, coro);
-    return;
+  switch(mode) {
+    case LOOP:
+      loop->PostTask(FROM_HERE, invoke, loop, mode);
+      break;
+    case CORO:
+      CO_GO std::bind(invoke, loop, mode);
+      break;
+    case CORO_WITH_LOOP:
+      CO_GO loop << std::bind(invoke, loop, mode);
+      break;
+    default:
+      break;
   }
-  loop->PostTask(FROM_HERE, invoke, loop, false);
 }
 
-TEST_CASE("co_task_obo_bench", "[new coro task bench per second one by one]") {
+TEST_CASE("co_task_obo_bench",
+          "[schedule coro task one after one]") {
+  FLAGS_v = 0;
   base::MessageLoop loop;
   loop.Start();
   LOG(INFO) << __FUNCTION__ << ", co_task_obo_bench run";
   counter = 0;
-  CO_GO& loop << std::bind(invoke, &loop, true);
+  CO_GO &loop << std::bind(invoke, &loop, BenchMode::CORO);
   start_time = base::time_us();
-
+  LOG(INFO) << __FUNCTION__ << ", wait loop end:" << loop.LoopName();
   loop.WaitLoopEnd();
   LOG(INFO) << __FUNCTION__ << ", co_task_obo_bench end";
 }
 
-TEST_CASE("task_obo_bench", "[new task bench per second one by one]") {
-  LOG(INFO) << __FUNCTION__ << ", task_obo_bench run";
+TEST_CASE("co_task_obo_bench_bind_loop",
+          "[schedule coro task one after one with specific loop]") {
 
+  FLAGS_v = 0;
   base::MessageLoop loop;
   loop.Start();
 
+  LOG(INFO) << __FUNCTION__ << ", co_task_obo_bench_bind_loop run";
   counter = 0;
-  loop.PostTask(FROM_HERE, invoke, &loop, false);
+  loop.PostTask(FROM_HERE, invoke, &loop, BenchMode::CORO_WITH_LOOP);
   start_time = base::time_us();
 
-  LOG(INFO) << __FUNCTION__ << ", wait loop, threadLoopID:"
-    << base::EventPump::CurrentThreadLoopID()
-    << ", loopID:" << loop.Pump()->LoopID();
+  LOG(INFO) << __FUNCTION__ << ", wait loop end:" << loop.LoopName();
+  loop.WaitLoopEnd();
+  LOG(INFO) << __FUNCTION__ << ", co_task_obo_bench_bind_loop end";
+}
+
+TEST_CASE("task_obo_bench",
+          "[schedule normal task one after one]") {
+  FLAGS_v = 0;
+  base::MessageLoop loop;
+  loop.Start();
+
+  LOG(INFO) << __FUNCTION__ << ", task_obo_bench run";
+  counter = 0;
+  loop.PostTask(FROM_HERE, invoke, &loop, BenchMode::LOOP);
+  start_time = base::time_us();
+
+  LOG(INFO) << __FUNCTION__ << ", wait loop end:" << loop.LoopName();
   loop.WaitLoopEnd();
   LOG(INFO) << __FUNCTION__ << ", task_obo_bench end";
 }

@@ -38,17 +38,3 @@ SET(COMPONENT_SOURCES
 
 add_library(ltcomponent_objs OBJECT ${COMPONENT_SOURCES})
 ltio_default_properties(ltcomponent_objs)
-
-#add_library(ltcomponent STATIC ${COMPONENT_SOURCES})
-#ltio_default_properties(ltcomponent)
-#target_link_libraries(ltcomponent
-#  PUBLIC ${CORO_LIBRARY}
-#  )
-#target_compile_definitions(ltcomponent
-#  PUBLIC ${CORO_LIB_COMPILE_DEFINE}
-#)
-#target_include_directories(ltcomponent PUBLIC
-#  ${LtIO_INCLUDE_DIRS}
-#  ${PROJECT_SOURCE_DIR}
-#  ${PROJECT_SOURCE_DIR}/thirdparty
-#)

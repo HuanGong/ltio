@@ -105,9 +105,7 @@ uint64_t MessageLoop::GenLoopID() {
   return generate_loop_id();
 }
 
-MessageLoop::MessageLoop()
-  : MessageLoop(generate_loop_name()) {
-}
+MessageLoop::MessageLoop() : MessageLoop(generate_loop_name()) {}
 
 MessageLoop::MessageLoop(const std::string& name)
   : running_(0),
@@ -159,9 +157,11 @@ void MessageLoop::WakeUpIfNeeded() {
 
 bool MessageLoop::HandleRead(FdEvent* fd_event) {
   if (fd_event == task_event_.get()) {
+
     RunCommandTask(ScheduledTaskType::TaskTypeDefault);
 
   } else if (fd_event == wakeup_event_.get()) {
+
     RunCommandTask(ScheduledTaskType::TaskTypeCtrl);
 
   } else {
@@ -208,6 +208,12 @@ void MessageLoop::Start() {
 
 void MessageLoop::InstallPersistRunner(PersistRunner* runner) {
   CHECK(IsInLoopThread());
+  for (auto installed : persist_runner_) {
+    if (installed == runner) {
+      LOG(ERROR) << "persist_runner has registered:" << runner;
+      return;
+    }
+  }
   persist_runner_.push_back(runner);
 }
 
@@ -225,12 +231,12 @@ void MessageLoop::WaitLoopEnd(int32_t ms) {
 }
 
 uint64_t MessageLoop::PumpTimeout() {
-  DCHECK(IsInLoopThread());
-  if (in_loop_tasks_.size() || scheduled_tasks_.size_approx()) {
-    return 0;
-  }
-  return 50;
+  return PendingTasksCount() > 0 ? 0 : 50;
 };
+
+size_t MessageLoop::PendingTasksCount() const {
+  return in_loop_tasks_.size() + scheduled_tasks_.size_approx();
+}
 
 void MessageLoop::ThreadMain() {
   event_pump_.PrepareRun();
@@ -267,9 +273,7 @@ void MessageLoop::ThreadMain() {
 }
 
 bool MessageLoop::PostDelayTask(TaskBasePtr task, uint32_t ms) {
-  LOG_IF(ERROR, status_ != ST_STARTED)
-    << LOOP_LOG_DETAIL << "not started, task:" << task->TaskLocation().ToString();
-
+  CHECK(status_ == ST_STARTED) << LOOP_LOG_DETAIL;
   if (!IsInLoopThread()) {
     return PostTask(
         TaskBasePtr(new TimeoutTaskHelper(std::move(task), &event_pump_, ms)));
@@ -281,28 +285,16 @@ bool MessageLoop::PostDelayTask(TaskBasePtr task, uint32_t ms) {
   return true;
 }
 
-bool MessageLoop::PendingNestedTask(TaskBasePtr&& task) {
-  DCHECK(IsInLoopThread());
-
-  // see PumpTimeout; when a nestedtask append, the loop will back
-  // to pump, PumpTimeout return 0(ms) when has more task to run
-  // WakeUpIfNeeded();
-
-  in_loop_tasks_.push_back(std::move(task));
-  return true;
-}
-
 bool MessageLoop::PostTask(TaskBasePtr&& task) {
-  LOG_IF(ERROR, status_ != ST_STARTED)
-    << LOOP_LOG_DETAIL << "not started, task:" << task->TaskLocation().ToString();
-
+  CHECK(status_ == ST_STARTED) << LOOP_LOG_DETAIL;
+  bool result = true;
   if (IsInLoopThread()) {
-    return PendingNestedTask(std::move(task));
+    in_loop_tasks_.push_back(std::move(task));
+    return true;
   }
-
-  bool ret = scheduled_tasks_.enqueue(std::move(task));
+  result = scheduled_tasks_.enqueue(std::move(task));
   WakeUpIfNeeded();
-  return ret;
+  return result;
 }
 
 void MessageLoop::RunTimerClosure(const TimerEventList& timer_evs) {
@@ -323,8 +315,9 @@ void MessageLoop::RunScheduledTask() {
 void MessageLoop::RunNestedTask() {
   DCHECK(IsInLoopThread());
 
-  std::vector<TaskBasePtr> nest_tasks(std::move(in_loop_tasks_));
-  in_loop_tasks_.clear();
+  std::vector<TaskBasePtr> nest_tasks;
+  std::swap(in_loop_tasks_, nest_tasks);
+
   for (const auto& task : nest_tasks) {
     task->Run();
   }
@@ -377,24 +370,7 @@ void MessageLoop::QuitLoop() {
 }
 
 int MessageLoop::Notify(int fd, const void* data, size_t count) {
-  const static int32_t max_retry_times = 3;
-  int ret = 0, retry = 0;
-
-  do {
-    ret = ::write(fd, data, count);
-    if (ret > 0) {
-      return ret;
-    }
-
-    switch (errno) {
-      case EINTR:
-      case EAGAIN:
-        continue;
-      default:
-        return ret;
-    }
-  } while (retry++ < max_retry_times);
-  return ret;
+  return ::write(fd, data, count);
 }
 
 void MessageLoop::SetThreadNativeName() {

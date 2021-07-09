@@ -12,3 +12,6 @@
 [submodule "thirdparty/gflags"]
 	path = thirdparty/gflags
 	url = https://github.com/gflags/gflags.git
+[submodule "thirdparty/fcontext"]
+	path = thirdparty/fcontext
+	url = https://github.com/echoface/deboost.context.git

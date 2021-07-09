@@ -66,9 +66,7 @@ void SocketChannel::ShutdownChannel(bool half_close) {
   VLOG(GLOG_VTRACE) << __FUNCTION__ << ChannelInfo();
   schedule_shutdown_ = true;
   if (half_close) {
-    if (!fd_event_->IsWriteEnable()) {
-      fd_event_->EnableWriting();
-    }
+    fd_event_->EnableWriting();
     SetChannelStatus(Status::CLOSING);
     return;
   }
@@ -107,6 +105,7 @@ bool SocketChannel::HandleClose(base::FdEvent* event) {
 
 void SocketChannel::setup_channel() {
   fd_event_->EnableReading();
+  fd_event_->EnableWriting();
   pump_->InstallFdEvent(fd_event_.get());
 
   SetChannelStatus(Status::CONNECTED);

@@ -121,9 +121,9 @@ private:
   void ThreadMain();
   void SetThreadNativeName();
 
-  bool PendingNestedTask(TaskBasePtr&& task);
-
   void RunCommandTask(ScheduledTaskType t);
+
+  size_t PendingTasksCount() const;
 
   // nested task: post another task in current loop
   // override from pump for nested task;

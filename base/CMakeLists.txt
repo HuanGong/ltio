@@ -24,9 +24,7 @@ SET(BASE_SOURCES
   utils/string/str_utils.cc
 
   #coroutine
-  coroutine/coroutine.cc
   coroutine/wait_group.cc
-  coroutine/bstctx_impl.cc
   coroutine/coroutine_runner.cc
 
   # task eventloop
@@ -61,7 +59,6 @@ add_library(ltbase_objs OBJECT ${BASE_SOURCES})
 
 ltio_default_properties(ltbase_objs)
 add_dependencies(ltbase_objs
-  fcontext
   ${CORO_LIBRARY}
 )
 target_include_directories(ltbase_objs

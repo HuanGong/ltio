@@ -38,6 +38,7 @@ public:
     for (int i = 0; i < loop_count; i++) {
       loops.push_back(new base::MessageLoop(fmt::format("io_{}", i)));
       loops.back()->Start();
+      CoroRunner::RegisteAsCoroWorker(loops.back());
     }
     // ProfilerStart("perf.out");
     http_server.WithIOLoops(loops)
@@ -78,7 +79,7 @@ public:
   }
 
   HttpServer http_server;
-  // HttpCoroServer http_server;
+  //HttpCoroServer http_server;
   base::MessageLoop main_loop;
   nlohmann::json json_message;
   std::vector<base::MessageLoop*> loops;
