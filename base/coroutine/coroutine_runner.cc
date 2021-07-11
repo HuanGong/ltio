@@ -19,68 +19,82 @@
 
 #include <base/closure/closure_task.h>
 #include <base/memory/lazy_instance.h>
+#include "bstctx_impl.hpp"
 #include "glog/logging.h"
 
-#include "coroutine.h"
-#ifdef USE_LIBACO_CORO_IMPL
-#include "aco_impl.cc"
-#else
-#include "coro_impl.cc"
-#endif
-
 namespace {
-const char* kCoSleepWarning =
-    "blocking co_sleep is hit, consider move you task into coro";
-const size_t kMaxStealOneSched = 1024;
+std::once_flag backgroup_once;
+
+const size_t kMaxStealOneSched = 64;
+
+constexpr int kMaxReuseCoroutineNumbersPerThread = 500;
+
+base::ConcurrentTaskQueue remote_queue_;
+
 }  // namespace
 
 namespace base {
 
-static std::once_flag backgroup_once;
+class CoroRunnerImpl;
+thread_local base::CoroRunnerImpl* _runner = NULL;
 
-static thread_local CoroRunner* tls_runner = NULL;
+class CoroRunnerImpl : public CoroRunner {
+public:
+  CoroRunnerImpl() : CoroRunner() { _runner = this; }
 
-static const int kMaxReuseCoroutineNumbersPerThread = 500;
-
-ConcurrentTaskQueue CoroRunner::remote_queue_;
-
-// IMPORTANT NOTE: NO HEAP MEMORY HERE!!!
-#ifdef USE_LIBACO_CORO_IMPL
-void CoroRunner::CoroutineEntry() {
-  Coroutine* coroutine = static_cast<Coroutine*>(aco_get_arg());
-#else
-void CoroRunner::CoroutineEntry(void* coro) {
-  Coroutine* coroutine = static_cast<Coroutine*>(coro);
-#endif
-
-  CHECK(coroutine);
-  CoroRunner& runner = instance();
-  {
-    TaskBasePtr task;
+  static void CoroMain(fcontext_transfer_t from) {
+    Coroutine* coro = (Coroutine*)from.data;
+    _runner->main_->co_ctx_ = from;
+  AGAIN:
     do {
-      coroutine->ResetElapsedTime();
-      if (runner.GetTask(task)) {
+      TaskBasePtr task;
+      while (_runner->PickTask(task)) {
         task->Run();
-        task.reset();
       }
-    } while (runner.ContinueRun());
-    task.reset();
+      task.reset();
+      _runner->no_more_task_ = true;
+      _runner->GC(coro);
+      _runner->Yield();
+    } while (0);
+    /* this make a coroutine can reuse without reset callstack, just
+     * call co->Resume() to reuse this coro context, but!, after testing
+     * reset a call stack can more fast than reuse current stack status
+     * see: Coroutine::Reset(fn), so when use parking coro, we reset it,
+     * instead of just call coro->Resume(); about 1/15 perfomance improve*/
+    goto AGAIN;
   }
-  coroutine->SetState(CoroState::kDone);
-  runner.Append2GCCache(coroutine);
 
-#ifdef USE_LIBACO_CORO_IMPL
-  // libaco aco_exti will swapout current and jump back pthread flow
-  runner.current_ = runner.main_coro_;
-  coroutine->Exit();
-#else
-  /* libcoro has the same flow for exit the finished coroutine*/
-  runner.switch_context(runner.main_coro_);
-#endif
-}
+  /* a callback function using for resume a kPaused coroutine */
+
+  /* 如果本身是在一个子coro里面,
+   * 需要在重新将resume调度到MainCoro内
+   * 如果本身是MainCoro，则直接进行切换.
+   * 如果不是在调度的线程里,则调度到目标Loop去Resume*/
+  void Resume(std::weak_ptr<Coroutine>& coro, uint64_t id) {
+    if (bind_loop_->IsInLoopThread() && in_main_coro()) {
+      return do_resume(coro, id);
+    }
+    auto f = std::bind(&CoroRunnerImpl::do_resume, this, coro, id);
+    CHECK(bind_loop_->PostTask(NewClosure(f)));
+  }
+
+  /* do resume a coroutine from main_coro*/
+  void do_resume(WeakCoroutine& weak, uint64_t id) {
+    DCHECK(in_main_coro());
+    RefCoroutine coro = weak.lock();
+    if (!coro) {
+      return;
+    }
+    if (coro->ResumeID() == id) {
+      return switch_context(coro.get());
+    }
+    LOG(ERROR) << "already resumed, want:" << id
+               << " real:" << coro->ResumeID();
+  }
+};  // end CoroRunnerImpl
 
 CoroRunner& CoroRunner::instance() {
-  static thread_local CoroRunner runner;
+  static thread_local CoroRunnerImpl runner;
   return runner;
 }
 
@@ -107,54 +121,48 @@ void CoroRunner::RegisteAsCoroWorker(MessageLoop* l) {
 
 // static
 bool CoroRunner::Yieldable() {
-  return tls_runner ? (!tls_runner->in_main_coro()) : false;
+  return _runner ? (!_runner->in_main_coro()) : false;
 }
 
 // static
 void CoroRunner::Sched(int64_t us) {
-  if (!tls_runner || tls_runner->in_main_coro()) {
+  if (!Yieldable()) {
     return;
   }
-  Coroutine* coro = tls_runner->current_;
-  if (coro->ElapsedTime() < us || tls_runner->task_count() == 0) {
+  Coroutine* coro = _runner->current_;
+  if (_runner->task_count() == 0 || coro->ElapsedTime() < us) {
     return;
   }
-  MessageLoop* loop = tls_runner->bind_loop_;
-  if (loop->PostTask(NewClosure(MakeResumer()))) {
-    return tls_runner->switch_context(tls_runner->main_coro_);
-  }
+  MessageLoop* loop = _runner->bind_loop_;
+  CHECK(loop->PostTask(NewClosure(MakeResumer())));
+
+  // yield to main coro; but without call yield avoid check yield able
+  _runner->switch_context(_runner->main_);
 }
 
 // static
 void CoroRunner::Yield() {
   CHECK(Yieldable());
-  tls_runner->switch_context(tls_runner->main_coro_);
+  _runner->switch_context(_runner->main_);
 }
 
 // static
 void CoroRunner::Sleep(uint64_t ms) {
-  if (!Yieldable()) {
-    DCHECK(false) << "co_sleep only work on coro context";
-    return;
-  }
-
-  MessageLoop* loop = tls_runner->bind_loop_;
-  if (loop->PostDelayTask(NewClosure(MakeResumer()), ms)) {
-    return tls_runner->switch_context(tls_runner->main_coro_);
-  }
-
-  std::this_thread::yield();
-  DCHECK(false) << "co_sleep failed, task schedule failed";
+  CHECK(Yieldable()) << "co_sleep only work on coro context";
+  MessageLoop* loop = _runner->bind_loop_;
+  CHECK(loop->PostDelayTask(NewClosure(MakeResumer()), ms));
+  Yield();
 }
 
 // static
 LtClosure CoroRunner::MakeResumer() {
   if (!Yieldable()) {
+    LOG(WARNING) << "make resumer on main_coro";
     return nullptr;
   }
-  auto weak_coro = tls_runner->current_->AsWeakPtr();
-  uint64_t resume_id = tls_runner->current_->ResumeID();
-  return std::bind(&CoroRunner::Resume, tls_runner, weak_coro, resume_id);
+  auto weak_coro = _runner->current_->AsWeakPtr();
+  uint64_t resume_id = _runner->current_->ResumeID();
+  return std::bind(&CoroRunnerImpl::Resume, _runner, weak_coro, resume_id);
 }
 
 // static
@@ -166,64 +174,34 @@ CoroRunner::CoroRunner()
   : bind_loop_(MessageLoop::Current()),
     max_parking_count_(kMaxReuseCoroutineNumbersPerThread) {
   CHECK(bind_loop_);
-
-  tls_runner = this;
-  main_ = Coroutine::CreateMain();
-  current_ = main_coro_ = main_.get();
+  main_ = Coroutine::New()->SelfHolder();
+  current_ = main_;
 
   bind_loop_->InstallPersistRunner(this);
   VLOG(GLOG_VINFO) << "CoroutineRunner@" << this << " initialized";
 }
 
 CoroRunner::~CoroRunner() {
-  GcAllCachedCoroutine();
+  FreeCoros();
   for (auto coro : parking_coros_) {
     coro->ReleaseSelfHolder();
   }
   parking_coros_.clear();
-
+  main_->ReleaseSelfHolder();
   current_ = nullptr;
-  main_coro_ = nullptr;
   VLOG(GLOG_VINFO) << "CoroutineRunner@" << this << " gone";
 }
 
-bool CoroRunner::StealingTasks() {
-  TaskBasePtr task;
-  if (stealing_counter_ > kMaxStealOneSched ||
-      false == remote_queue_.try_dequeue(task)) {
-    return false;
-  }
-
-  stealing_counter_++;
-  coro_tasks_.push_back(std::move(task));
-  return true;
-}
-
-bool CoroRunner::GetTask(TaskBasePtr& task) {
-  if (coro_tasks_.empty()) {
-    return false;
-  }
-  task = std::move(coro_tasks_.front());
-  coro_tasks_.pop_front();
-  return true;
-}
-
-bool CoroRunner::ContinueRun() {
+bool CoroRunner::PickTask(TaskBasePtr& task) {
   if (coro_tasks_.size()) {
+    task = std::move(coro_tasks_.front());
+    coro_tasks_.pop_front();
     return true;
   }
-
-  if (StealingTasks()) {
+  if (remote_cnt_ < kMaxStealOneSched && remote_queue_.try_dequeue(task)) {
+    remote_cnt_++;
     return true;
   }
-
-  // parking this coroutine for next task
-  if (parking_coros_.size() < max_parking_count_) {
-    parking_coros_.push_back(current_);
-    switch_context(main_coro_);
-    return true;
-  }
-
   return false;
 }
 
@@ -237,76 +215,56 @@ void CoroRunner::LoopGone(MessageLoop* loop) {
 }
 
 void CoroRunner::Run() {
-  stealing_counter_ = 0;
+  remote_cnt_ = 0;
+  no_more_task_ = false;
+  VLOG_EVERY_N(GLOG_VTRACE, 1000) << " coroutine runner enter";
+  // P(CoroRunner) take a M(Corotine) do work(TaskBasePtr)
   // after here, any nested task will be handled next loop
   coro_tasks_.swap(sched_tasks_);
-
-  // P(CoroRunner) take a M(Corotine) do work(TaskBasePtr)
-  while (task_count() > 0) {
-    Coroutine* coro = RetrieveCoroutine();
-    DCHECK(coro);
-
-    switch_context(coro);
+  while (coro_tasks_.size()) {
+    switch_context(Spawn());
   }
 
-  GcAllCachedCoroutine();
-}
-
-/* 如果本身是在一个子coro里面,
- * 需要在重新将resume调度到MainCoro内
- * 如果本身是MainCoro，则直接进行切换.
- * 如果不是在调度的线程里,则调度到目标Loop去Resume*/
-void CoroRunner::Resume(std::weak_ptr<Coroutine>& weak, uint64_t id) {
-  if (bind_loop_->IsInLoopThread() && in_main_coro()) {
-    return DoResume(weak, id);
+  while (!no_more_task_) {
+    switch_context(Spawn());
   }
-  auto f = std::bind(&CoroRunner::DoResume, this, weak, id);
-  CHECK(bind_loop_->PostTask(NewClosure(f)));
-}
-
-void CoroRunner::DoResume(WeakCoroutine& weak, uint64_t id) {
-  DCHECK(in_main_coro());
-
-  Coroutine* coroutine = nullptr;
-  {
-    auto coro = weak.lock();
-    if (!coro) {
-      return;
-    }
-
-    coroutine = coro.get();
-  }
-  if (!coroutine->CanResume(id)) {
-    return;
-  }
-  return switch_context(coroutine);
+  FreeCoros();
 }
 
 void CoroRunner::switch_context(Coroutine* next) {
-  DCHECK(next != current_) << "bad context switch";
-  Coroutine* current = current_;
-  VLOG(GLOG_VTRACE) << current->CoInfo() << " switch to:" << next->CoInfo();
+  CHECK(next != current_) << "bad context switch";
   current_ = next;
-  current->TransferTo(next);
+  next->Resume();
 }
 
-Coroutine* CoroRunner::RetrieveCoroutine() {
+size_t CoroRunner::task_count() const {
+  return coro_tasks_.size() + remote_queue_.size_approx();
+}
+
+Coroutine* CoroRunner::Spawn() {
   Coroutine* coro = nullptr;
   while (parking_coros_.size()) {
     coro = parking_coros_.front();
     parking_coros_.pop_front();
-
-    if (coro)
+    if (coro) {
+      // reset the coro context stack make next time resume more fast
+      // bz when context swich can with out copy any data, just jump
+      // coro->Reset(CoroRunnerImpl::CoroMain);
       return coro;
+    }
   }
-
-  auto coro_ptr = Coroutine::Create(&CoroRunner::CoroutineEntry, main_coro_);
-  coro_ptr->SelfHolder(coro_ptr);
-
-  return coro_ptr.get();
+  return Coroutine::New(CoroRunnerImpl::CoroMain)->SelfHolder();
 }
 
-void CoroRunner::GcAllCachedCoroutine() {
+void CoroRunner::GC(Coroutine* co) {
+  if (parking_coros_.size() < max_parking_count_) {
+    parking_coros_.push_back(co);
+    return;
+  }
+  cached_gc_coros_.emplace_back(co);
+};
+
+void CoroRunner::FreeCoros() {
   for (auto& coro : cached_gc_coros_) {
     coro->ReleaseSelfHolder();
   }

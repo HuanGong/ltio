@@ -76,7 +76,6 @@ void EventPump::Run() {
     if (delegate_) {
       delegate_->RunNestedTask();
     }
-    ProcessTimerEvent();
   }
   running_ = false;
   delete[] active_list;

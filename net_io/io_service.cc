@@ -159,15 +159,16 @@ void IOService::OnNewConnection(int fd, const IPEndPoint& peer_addr) {
 }
 
 void IOService::OnCodecMessage(const RefCodecMessage& message) {
-  return delegate_->OnRequestMessage(message);
+  delegate_->OnRequestMessage(std::move(message));
 }
 
 void IOService::OnProtocolServiceGone(const net::RefCodecService& service) {
   // use another task remove a service is a more safe way delete channel&
   // protocol things avoid somewhere->B(do close a channel) ->  ~A  -> use A
   // again in somewhere
-  acpt_io_->PostTask(FROM_HERE, [this, service]() {
-    this->RemoveProtocolService(service);
+  auto guard_this = shared_from_this();
+  acpt_io_->PostTask(FROM_HERE, [guard_this, service]() {
+    guard_this->RemoveProtocolService(service);
   });
 }
 

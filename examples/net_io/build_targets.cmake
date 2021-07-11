@@ -38,6 +38,7 @@ ADD_EXECUTABLE(http_benchmark_server
 )
 TARGET_LINK_LIBRARIES(http_benchmark_server
   ltio
+  profiler
 )
 
 ADD_EXECUTABLE(lt_http_client

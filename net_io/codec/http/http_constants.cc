@@ -43,188 +43,58 @@ const std::string HttpConstant::kHeaderDefaultContentType =
 const std::string HttpConstant::kHeaderSupportedEncoding =
     "Accept-Encoding: deflate,gzip\r\n";
 
-const char* HttpConstant::StatusCodeCStr(int32_t code) {
-  switch (code) {
-    case 100: {
-      return "Continue";
-    } break;
-    case 101: {
-      return "Switching Protocols";
-    } break;
-    case 102: {
-      return "Processing";
-    } break;
-    case 200: {
-      return "OK";
-    } break;
-    case 201: {
-      return "Created";
-    } break;
-    case 202: {
-      return "Accepted";
-    } break;
-    case 203: {
-      return "Non-Authoritative Information";
-    } break;
-    case 204: {
-      return "No Content";
-    } break;
-    case 205: {
-      return "Reset Content";
-    } break;
-    case 206: {
-      return "Partial Content";
-    } break;
-    case 207: {
-      return "Multi-Status";
-    } break;
-    case 208: {
-      return "Already Reported";
-    } break;
-    case 226: {
-      return "IM Used";
-    } break;
-    case 300: {
-      return "Multiple Choices";
-    } break;
-    case 301: {
-      return "Moved Permanently";
-    } break;
-    case 302: {
-      return "Found";
-    } break;
-    case 303: {
-      return "See Other";
-    } break;
-    case 304: {
-      return "Not Modified";
-    } break;
-    case 305: {
-      return "Use Proxy";
-    } break;
-    case 307: {
-      return "Temporary Redirect";
-    } break;
-    case 308: {
-      return "Permanent Redirect";
-    } break;
-    case 400: {
-      return "Bad Request";
-    } break;
-    case 401: {
-      return "Unauthorized";
-    } break;
-    case 402: {
-      return "Payment Required";
-    } break;
-    case 403: {
-      return "Forbidden";
-    } break;
-    case 404: {
-      return "Not Found";
-    } break;
-    case 405: {
-      return "Method Not Allowed";
-    } break;
-    case 406: {
-      return "Not Acceptable";
-    } break;
-    case 407: {
-      return "Proxy Authentication Required";
-    } break;
-    case 408: {
-      return "Request Timeout";
-    } break;
-    case 409: {
-      return "Conflict";
-    } break;
-    case 410: {
-      return "Gone";
-    } break;
-    case 411: {
-      return "Length Required";
-    } break;
-    case 412: {
-      return "Precondition Failed";
-    } break;
-    case 413: {
-      return "Payload Too Large";
-    } break;
-    case 414: {
-      return "URI Too Long";
-    } break;
-    case 415: {
-      return "Unsupported Media Type";
-    } break;
-    case 416: {
-      return "Range Not Satisfiable";
-    } break;
-    case 417: {
-      return "Expectation Failed";
-    } break;
-    case 421: {
-      return "Misdirected Request";
-    } break;
-    case 422: {
-      return "Unprocessable Entity";
-    } break;
-    case 423: {
-      return "Locked";
-    } break;
-    case 424: {
-      return "Failed Dependency";
-    } break;
-    case 426: {
-      return "Upgrade Required";
-    } break;
-    case 428: {
-      return "Precondition Required";
-    } break;
-    case 429: {
-      return "Too Many Requests";
-    } break;
-    case 431: {
-      return "Request Header Fields Too Large";
-    } break;
-    case 451: {
-      return "Unavailable For Legal Reasons";
-    } break;
-    case 500: {
-      return "Internal Server Error";
-    } break;
-    case 501: {
-      return "Not Implemented";
-    } break;
-    case 502: {
-      return "Bad Gateway";
-    } break;
-    case 503: {
-      return "Service Unavailable";
-    } break;
-    case 504: {
-      return "Gateway Timeout";
-    } break;
-    case 505: {
-      return "HTTP Version Not Supported";
-    } break;
-    case 506: {
-      return "Variant Also Negotiates";
-    } break;
-    case 507: {
-      return "Insufficient Storage";
-    } break;
-    case 508: {
-      return "Loop Detected";
-    } break;
-    case 510: {
-      return "Not Extended";
-    } break;
-    case 511: {
-      return "Network Authentication Required";
-    } break;
-    default: { return "UNKNOWN"; } break;
-  }
+const char** create_status_table() {
+    static const char* s[512];
+    for (int i = 0; i < 512; ++i) s[i] = "";
+    s[100] = " 100 Continue\r\n";
+    s[101] = " 101 Switching Protocols\r\n";
+    s[200] = " 200 OK\r\n";
+    s[201] = " 201 Created\r\n";
+    s[202] = " 202 Accepted\r\n";
+    s[203] = " 203 Non-authoritative Information\r\n";
+    s[204] = " 204 No Content\r\n";
+    s[205] = " 205 Reset Content\r\n";
+    s[206] = " 206 Partial Content\r\n";
+    s[300] = " 300 Multiple Choices\r\n";
+    s[301] = " 301 Moved Permanently\r\n";
+    s[302] = " 302 Found\r\n";
+    s[303] = " 303 See Other\r\n";
+    s[304] = " 304 Not Modified\r\n";
+    s[305] = " 305 Use Proxy\r\n";
+    s[307] = " 307 Temporary Redirect\r\n";
+    s[400] = " 400 Bad Request\r\n";
+    s[401] = " 401 Unauthorized\r\n";
+    s[402] = " 402 Payment Required\r\n";
+    s[403] = " 403 Forbidden\r\n";
+    s[404] = " 404 Not Found\r\n";
+    s[405] = " 405 Method Not Allowed\r\n";
+    s[406] = " 406 Not Acceptable\r\n";
+    s[407] = " 407 Proxy Authentication Required\r\n";
+    s[408] = " 408 Request Timeout\r\n";
+    s[409] = " 409 Conflict\r\n";
+    s[410] = " 410 Gone\r\n";
+    s[411] = " 411 Length Required\r\n";
+    s[412] = " 412 Precondition Failed\r\n";
+    s[413] = " 413 Payload Too Large\r\n";
+    s[414] = " 414 Request-URI Too Long\r\n";
+    s[415] = " 415 Unsupported Media Type\r\n";
+    s[416] = " 416 Requested Range Not Satisfiable\r\n";
+    s[417] = " 417 Expectation Failed\r\n";
+    s[500] = " 500 Internal Server Error\r\n";
+    s[501] = " 501 Not Implemented\r\n";
+    s[502] = " 502 Bad Gateway\r\n";
+    s[503] = " 503 Service Unavailable\r\n";
+    s[504] = " 504 Gateway Timeout\r\n";
+    s[505] = " 505 HTTP Version Not Supported\r\n";
+    return s;
 }
+
+// format: "200 OK\r\n"
+const char* HttpConstant::GetResponseStatusTail(int n) {
+	static const char** s = create_status_table();
+	return (100 <= n && n <= 511) ? s[n] : s[500];
+}
+
 
 }  // namespace net
 }  // namespace lt

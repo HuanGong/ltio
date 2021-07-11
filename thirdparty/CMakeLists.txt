@@ -1,14 +1,9 @@
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
 
-if (LTIO_USE_ACO_CORO_IMPL)
-  ADD_SUBDIRECTORY(libaco)
-else()
-  ADD_SUBDIRECTORY(libcoro)
-endif()
-
 ADD_SUBDIRECTORY(fmt)
 ADD_SUBDIRECTORY(resp)
 ADD_SUBDIRECTORY(hat-trie)
+ADD_SUBDIRECTORY(fcontext)
 
 SET(LT_3RD_SRSC
   #hash

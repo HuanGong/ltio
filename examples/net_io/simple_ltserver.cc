@@ -116,9 +116,9 @@ public:
     int loop_count =
         std::min(FLAGS_loops, int(std::thread::hardware_concurrency()));
     for (int i = 0; i < loop_count; i++) {
-      auto loop = new (base::MessageLoop);
-      loop->SetLoopName("io_" + std::to_string(i));
+      auto loop = new base::MessageLoop("io_" + std::to_string(i));
       loop->Start();
+      CoroRunner::RegisteAsCoroWorker(loop);
       loops.push_back(loop);
     }
 
@@ -156,7 +156,7 @@ public:
 
   void HandleRawRequest(RefRawRequestContext context) {
     const LtRawMessage* req = context->GetRequest<LtRawMessage>();
-    LOG_EVERY_N(INFO, 10000) << " got request:" << req->Dump();
+    LOG_EVERY_N(INFO, 10000) << "got request:" << req->Dump();
 
     auto res = LtRawMessage::CreateResponse(req);
     res->SetContent(req->Content());
@@ -165,7 +165,7 @@ public:
 
   void HandleHttpRequest(RefHttpRequestCtx context) {
     const HttpRequest* req = context->Request();
-    LOG_EVERY_N(INFO, 10000) << " got 1w Http request, body:" << req->Dump();
+    LOG_EVERY_N(INFO, 10000) << "got 1w Http request, body:" << req->Dump();
 
     RefHttpResponse response = HttpResponse::CreateWithCode(200);
     response->SetKeepAlive(req->IsKeepAlive());
